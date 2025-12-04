@@ -69,8 +69,8 @@ Snake-MIPS-PS2/
 export PS2DEV=/usr/local/ps2dev
 export PATH=$PATH:$PS2DEV/bin
 
-# Ensamblar el código
-mips-elf-as -o snake.o snake.asm
+# Ensamblar el código (con arquitectura PS2 Emotion Engine)
+mips-elf-as -march=r5900 -o snake.o snake.asm
 
 # Enlazar
 mips-elf-ld -o snake.elf snake.o -T ps2.ld

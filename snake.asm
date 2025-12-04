@@ -87,8 +87,10 @@
     # Tablero del juego (para detección de colisiones rápida)
     board:          .space 3072     # 32 * 24 * 4 bytes
     
-    # Buffer de video (simulado para desarrollo)
-    video_buffer:   .space 196608   # 512 * 384 bytes (simplificado)
+    # Buffer de video (simplificado para desarrollo)
+    # Nota: 512 * 384 = 196,608 píxeles; con 32-bit color = 786,432 bytes
+    # Aquí usamos un buffer reducido para demostración
+    video_buffer:   .space 786432   # 512 * 384 * 4 bytes (32-bit RGBA)
 
 .text
 .globl main
@@ -616,18 +618,26 @@ no_food:
 # GENERAR COMIDA EN POSICIÓN ALEATORIA
 ################################################################################
 spawn_food:
-    addiu   $sp, $sp, -16
+    addiu   $sp, $sp, -20
     sw      $ra, 0($sp)
     sw      $s0, 4($sp)
     sw      $s1, 8($sp)
+    sw      $s2, 12($sp)
+    
+    # Contador de reintentos (máximo 100 para evitar bucle infinito)
+    li      $s2, 100
     
 spawn_retry:
+    # Verificar límite de reintentos
+    beqz    $s2, food_position_ok   # Si agotamos reintentos, usar última posición
+    nop
+    addiu   $s2, $s2, -1
+    
     # Generar X aleatorio (0 a BOARD_WIDTH-1)
+    # Usar AND con máscara para BOARD_WIDTH=32 (potencia de 2)
     jal     random
     nop
-    li      $t0, BOARD_WIDTH
-    div     $v0, $t0
-    mfhi    $s0                     # food_x = random % BOARD_WIDTH
+    andi    $s0, $v0, 0x1F          # food_x = random & 31 (más eficiente que div)
     
     # Generar Y aleatorio (0 a BOARD_HEIGHT-1)
     jal     random
@@ -672,10 +682,11 @@ food_position_ok:
     sw      $s0, food_x
     sw      $s1, food_y
     
+    lw      $s2, 12($sp)
     lw      $s1, 8($sp)
     lw      $s0, 4($sp)
     lw      $ra, 0($sp)
-    addiu   $sp, $sp, 16
+    addiu   $sp, $sp, 20
     jr      $ra
     nop
 
@@ -686,7 +697,7 @@ random:
     # Cargar semilla actual
     lw      $v0, random_seed
     
-    # LFSR de 16 bits con taps en 16, 14, 13, 11
+    # LFSR de 16 bits con taps en posiciones 0, 2, 3, 5
     # bit = (seed >> 0) ^ (seed >> 2) ^ (seed >> 3) ^ (seed >> 5)
     srl     $t0, $v0, 0
     andi    $t0, $t0, 1
@@ -875,25 +886,26 @@ border_done:
 
 ################################################################################
 # DIBUJAR UNA CELDA EN EL TABLERO
-# Argumentos: $a0 = x, $a1 = y, $a2 = color (RGB)
+# Argumentos: $a0 = x (coordenada de celda), $a1 = y (coordenada de celda), $a2 = color (RGB)
+# Nota: Las coordenadas son posiciones en el tablero (0-31, 0-23), no píxeles
 ################################################################################
 draw_cell:
-    # Calcular posición en píxeles
-    # pixel_x = (x + 1) * CELL_SIZE (offset de 1 por el borde)
-    # pixel_y = (y + 1) * CELL_SIZE
+    # Convertir coordenadas de celda a píxeles
+    # pixel_x = (cell_x + 1) * CELL_SIZE (offset de 1 por el borde)
+    # pixel_y = (cell_y + 1) * CELL_SIZE
     
-    addiu   $t0, $a0, 1
-    sll     $t0, $t0, 4             # * 16 (CELL_SIZE)
+    addiu   $t0, $a0, 1             # cell_x + 1 (offset por borde)
+    sll     $t0, $t0, 4             # * 16 (CELL_SIZE) -> pixel_x
     
-    addiu   $t1, $a1, 1
-    sll     $t1, $t1, 4             # * 16 (CELL_SIZE)
+    addiu   $t1, $a1, 1             # cell_y + 1 (offset por borde)
+    sll     $t1, $t1, 4             # * 16 (CELL_SIZE) -> pixel_y
     
     # Calcular dirección base en el buffer de video
-    # address = video_buffer + (y * 512 + x) * 4
+    # address = video_buffer + (pixel_y * 512 + pixel_x) * 4
     la      $t2, video_buffer
-    sll     $t3, $t1, 9             # y * 512
-    add     $t3, $t3, $t0
-    sll     $t3, $t3, 2             # * 4 (bytes por pixel)
+    sll     $t3, $t1, 9             # pixel_y * 512
+    add     $t3, $t3, $t0           # + pixel_x
+    sll     $t3, $t3, 2             # * 4 (bytes por pixel RGBA)
     add     $t2, $t2, $t3
     
     # Dibujar cuadrado de CELL_SIZE x CELL_SIZE
